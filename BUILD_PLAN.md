@@ -1,6 +1,6 @@
 # Build plan and status
 
-The plan comes from `research/write-guard/investigation.md` (section 6.4).
+The plan comes from `docs/investigation.md` (section 6.4). The idea came from the paper-scout run of 2026-11-14.
 
 ## Week 1: core mediator ✅ (2026-11-14)
 - [x] Schema-derived policy, fail-closed classification, default-authority arguments
