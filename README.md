@@ -23,6 +23,35 @@ g.observe(tool_name, tool_result)  # every result; only record tools count
 d = g.check(tool_name, args)       # ALLOW | CONFIRM | DENY, with a reason per argument
 ```
 
+## Framework adapters
+**Claude Agent SDK**: hooks on `UserPromptSubmit`, `PreToolUse` and `PostToolUse`:
+```python
+from originguard.adapters.claude_agent_sdk import guard_hooks
+options = ClaudeAgentOptions(mcp_servers=..., hooks=guard_hooks(guard, approver=slack_approver))
+```
+- ALLOW makes no permission decision, so the SDK's own permissions still apply (the guard only tightens).
+- DENY becomes `"deny"`, with the reason sent back to the model.
+- CONFIRM goes to your out-of-band `approver`, or else becomes `"ask"`.
+- Built-in tools (Bash, Write, WebFetch…) are denied unless you list them in `passthrough`.
+
+**OpenAI Agents SDK**: `needs_approval` plus tool input/output guardrails:
+```python
+og = OpenAIAgentsGuard(Guard(OpenAIAgentsGuard.schemas(tools), overlay))
+agent = Agent(..., tools=og.wrap(tools))
+# CONFIRM pauses the run; resume with og.approve(state, item) or og.reject(state, item)
+```
+A call approved with a plain `state.approve()` that skips the guard is still rejected.
+
+**Shadow mode** (`mode="shadow"` on either adapter): decide and log, never block. Run this on real traffic first.
+
+## Audit log
+```python
+from originguard.audit import AuditLog
+guard = Guard(tools, overlay, audit=AuditLog("audit.jsonl", session="run-42"))
+```
+Every input and decision is written as one hash-chained JSON line. Untrusted tool output is stored as a hash only.
+`python -m originguard.audit audit.jsonl tools.json overlay.json` checks the chain **and** replays the inputs to re-derive every decision. An edited verdict is caught even if the attacker recomputes every hash.
+
 ## Defaults are fail-closed
 - Tools are classified by leading verb. Unknown tools (`execute_sql`, `run_command`, `http_request`) are **denied** until the overlay classifies them.
 - Every argument of a write tool is checked unless its name marks it as free-text payload (`body`, `subject`, `memo`…).
@@ -53,7 +82,8 @@ d = g.check(tool_name, args)       # ALLOW | CONFIRM | DENY, with a reason per a
 ```bash
 pip install -e ".[test]"
 python3 demo.py        # accounts-payable agent: changed-bank-details attack
-python3 -m pytest -q   # 33 tests, including Hypothesis property tests
+python3 -m pytest -q   # 50 tests: properties, regressions, audit, adapters
+ANTHROPIC_API_KEY=... python3 bench/live_ap.py --runs 3   # live Claude agent, guarded vs baseline (costs money)
 ```
 
-Status: **week 1 of a 5-week validation build.** See `BUILD_PLAN.md`.
+Status: **week 2 of a 5-week validation build.** See `BUILD_PLAN.md`.

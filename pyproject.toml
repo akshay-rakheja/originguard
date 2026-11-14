@@ -8,6 +8,9 @@ dependencies = []
 
 [project.optional-dependencies]
 test = ["pytest>=8", "hypothesis>=6"]
+claude = ["claude-agent-sdk>=0.2"]
+openai = ["openai-agents>=0.24"]
+bench = ["anthropic>=2.8"]
 
 [build-system]
 requires = ["setuptools>=68"]

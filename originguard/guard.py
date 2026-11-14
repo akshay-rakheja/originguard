@@ -15,6 +15,7 @@ content the agent has read.
 """
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass, field
 from decimal import Decimal
@@ -67,16 +68,26 @@ def _flatten(args: Any, prefix: str = "") -> Iterable[tuple[str, Any]]:
         yield prefix, args
 
 
+def _sha(obj: Any) -> str:
+    return hashlib.sha256(json.dumps(obj, sort_keys=True, default=str).encode()).hexdigest()
+
+
 class Guard:
-    def __init__(self, tools: list[dict], overlay: dict | None = None, *, strict: bool = False) -> None:
+    def __init__(self, tools: list[dict], overlay: dict | None = None, *, strict: bool = False,
+                 audit=None) -> None:
+        """`audit` is any object with .append(event_type, data), e.g. originguard.audit.AuditLog."""
         overlay = overlay or {}
         tool_overlays = overlay.get("tools", {})
         self.policies: dict[str, ToolPolicy] = {t["name"]: derive(t, tool_overlays.get(t["name"])) for t in tools}
         self.facts: dict[str, set[Fact]] = {"user": set(), "confirmed": set()}
         self.user_words: set[str] = set()
+        self.confirmed_words: set[str] = set()
         self.strict = strict
         self.committed: set[str] | None = None
         self._untrusted_seen = False
+        self.audit = audit
+        self._emit("init", {"strict": strict, "overlay_sha256": _sha(overlay),
+                            "tools": {n: p.schema_sha256 for n, p in sorted(self.policies.items())}})
         for name, rec in (overlay.get("records") or {}).items():
             for typ, values in rec.items():
                 self.add_record(name, typ, values)
@@ -84,10 +95,13 @@ class Guard:
     # ---- trusted inputs -------------------------------------------------------------
     def user_turn(self, text: str) -> None:
         """Text from an authenticated human turn. Never pass tool output or pasted content here."""
+        self._emit("user_turn", {"text": text})
         self.facts["user"] |= extract(text)
         self.user_words |= words(text)
 
     def add_record(self, name: str, typ: str, values: Iterable[Any]) -> None:
+        values = list(values)
+        self._emit("record", {"name": name, "type": typ, "values": [str(v) for v in values]})
         bucket = self.facts.setdefault(f"record:{name}", set())
         for v in values:
             try:
@@ -100,18 +114,33 @@ class Guard:
 
     def confirm(self, typ: str, value: Any) -> None:
         """Called by the out-of-band approval channel only, never by the agent."""
-        self.facts["confirmed"].add((typ, canon.CANON[typ](value)))
+        self._emit("confirm", {"type": typ, "value": value})
+        if typ in ("bool", "enum"):
+            self.confirmed_words.add(str(value).lower())
+        else:
+            self.facts["confirmed"].add((typ, canon.CANON[typ](value)))
+
+    def confirm_decision(self, decision: "Decision") -> None:
+        """A human approved this exact call: ground every value that needed confirmation."""
+        for a in decision.args:
+            if a.verdict == "CONFIRM":
+                self.confirm(a.type, a.value)
 
     def commit(self, write_tools: Iterable[str]) -> None:
         """Strict mode: declare the write tools a task needs before reading untrusted content."""
         if self._untrusted_seen:
             raise RuntimeError("commit() must be called before any untrusted tool output is read")
+        self._emit("commit", {"tools": sorted(write_tools)})
         self.committed = {t for t in write_tools if t in self.policies}
 
     def observe(self, tool: str, result: Any) -> None:
         """Feed every tool result here. Only overlay-declared record tools contribute facts."""
         pol = self.policies.get(tool)
         rec = pol.record if pol and pol.effect == "read" else None
+        # Untrusted output is logged by hash only: it can never affect a decision, so the
+        # verifier does not need it, and the log does not become a copy of attacker content.
+        self._emit("observe", {"tool": tool, "record": bool(rec), "sha256": _sha(result),
+                               **({"result": result} if rec else {})})
         if not rec:
             self._untrusted_seen = True
             return
@@ -128,7 +157,16 @@ class Guard:
 
     # ---- the check ------------------------------------------------------------------
     def check(self, tool: str, args: dict | None) -> Decision:
-        args = args or {}
+        d = self._check(tool, args or {})
+        self._emit("check", {"tool": tool, "args": args or {}, "verdict": d.verdict,
+                             "args_verdicts": {a.path: [a.verdict, a.detail] for a in d.args}})
+        return d
+
+    def _emit(self, typ: str, data: dict) -> None:
+        if self.audit is not None:
+            self.audit.append(typ, data)
+
+    def _check(self, tool: str, args: dict) -> Decision:
         pol = self.policies.get(tool)
         if pol is None:
             return Decision(tool, "DENY", "unknown tool (not in the reviewed tool list)")
@@ -161,7 +199,7 @@ class Guard:
         if spec.type in ("bool", "enum"):
             if spec.has_default and value == spec.default:
                 return ArgDecision(spec.path, spec.type, value, "ALLOW", "schema default")
-            if str(value).lower() in self.user_words:
+            if str(value).lower() in self.user_words | self.confirmed_words:
                 return ArgDecision(spec.path, spec.type, value, "ALLOW", "user")
             return ungrounded("control value differs from the default and was not stated")
         try:
