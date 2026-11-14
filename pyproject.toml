@@ -1,0 +1,17 @@
+[project]
+name = "originguard"
+version = "0.1.0"
+description = "Deterministic origin checks for AI agent tool calls: a value may reach a state-changing tool only if it traces to the user, a confirmation, or a trusted record."
+requires-python = ">=3.10"
+license = "MIT"
+dependencies = []
+
+[project.optional-dependencies]
+test = ["pytest>=8", "hypothesis>=6"]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
