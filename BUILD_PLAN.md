@@ -21,6 +21,7 @@ The plan comes from `docs/investigation.md` (section 6.4). The idea came from th
 - [x] Tests against the real SDK types (no model calls): 50 tests total
 - [x] `bench/live_ap.py`: live Claude agent on accounts-payable scenarios, guarded vs baseline
 - [x] Run `bench/live_ap.py` (2026-11-17, 3 scenarios × 2 arms × 3 runs on Claude Opus 5.5): see [docs/results-live-ap-2026-11-17.md](docs/results-live-ap-2026-11-17.md)
+- [x] `bench/live_ap.py` second user turn (scripted `followup` per scenario, fires once when the model stops without a write), `--model` flag, two "user accepts the correction" variants; run on Claude Haiku 5.5, Claude Sonnet 5.5 and Claude Opus 5.5 (2026-11-17): see [docs/results-live-ap-2026-11-17-multimodel.md](docs/results-live-ap-2026-11-17-multimodel.md)
 - [ ] AgentDojo + AgentDyn runs on Claude Opus 5.5, Claude Sonnet 5.5 and Claude Haiku 5.5, vs undefended and ROPE, reported per model with confirmations counted three ways (needs the key)
 - [ ] End-to-end run inside the real Claude Agent SDK loop (needs the key and the bundled CLI)
 
